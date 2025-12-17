@@ -1,0 +1,511 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Expert Abaque PDF vers Excel</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        .loader {
+            border: 4px solid #e2e8f0;
+            border-top: 4px solid #f97316; /* Orange pour le côté 'Chantier/Expert' */
+            border-radius: 50%;
+            width: 24px;
+            height: 24px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .step-active { border-color: #f97316; background-color: #fff7ed; }
+        .tab-active { border-bottom: 2px solid #f97316; color: #c2410c; font-weight: 600; }
+        .tab-inactive { color: #64748b; hover:text-slate-800; }
+        /* Animation pour les logs */
+        .log-entry { font-size: 0.8rem; margin-top: 0.25rem; opacity: 0; animation: fadeIn 0.3s forwards; }
+        @keyframes fadeIn { to { opacity: 1; } }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800 font-sans min-h-screen">
+
+    <div class="max-w-5xl mx-auto p-6">
+        <!-- Header -->
+        <header class="mb-8 mt-4 flex items-center justify-between">
+            <div>
+                <h1 class="text-3xl font-bold text-slate-800 flex items-center gap-3">
+                    <i data-lucide="hard-hat" class="text-orange-500 w-10 h-10"></i>
+                    Expert Abaque AI
+                </h1>
+                <p class="text-slate-500 text-sm mt-1">Extraction multi-tableaux & Double vérification par IA</p>
+            </div>
+            <div class="bg-white px-4 py-2 rounded-lg shadow-sm text-xs text-slate-400 border border-slate-200">
+                v2.0 Beta (Deep Analyze)
+            </div>
+        </header>
+
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Left Column: Controls -->
+            <div class="lg:col-span-1 space-y-6">
+                
+                <!-- Step 1: Config -->
+                <div id="card-config" class="bg-white rounded-xl shadow-sm p-5 border border-slate-200 step-active">
+                    <h2 class="font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                        <span class="bg-slate-100 text-slate-600 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">1</span>
+                        Connexion IA
+                    </h2>
+                    <div class="space-y-3">
+                        <input type="password" id="api-key-input" placeholder="Clé API Gemini..." 
+                            class="w-full p-2 text-sm border border-slate-300 rounded focus:ring-2 focus:ring-orange-500 outline-none">
+                        <button onclick="verifyAndCatalogModels()" id="verify-btn" 
+                            class="w-full bg-slate-800 hover:bg-slate-900 text-white text-sm py-2 rounded font-medium transition flex justify-center items-center gap-2">
+                            Connecter & Scanner
+                        </button>
+                    </div>
+                    <div id="api-status" class="hidden mt-3 text-xs p-2 rounded bg-green-50 text-green-700 border border-green-100"></div>
+                </div>
+
+                <!-- Step 2: Upload -->
+                <div id="card-upload" class="bg-white rounded-xl shadow-sm p-5 border border-slate-200 opacity-50 pointer-events-none transition-all">
+                    <h2 class="font-semibold text-slate-700 mb-4 flex items-center gap-2">
+                        <span class="bg-slate-100 text-slate-600 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold">2</span>
+                        Fichier Abaque
+                    </h2>
+                    
+                    <div class="border-2 border-dashed border-slate-300 rounded-lg p-6 text-center hover:bg-orange-50 cursor-pointer transition"
+                         onclick="document.getElementById('file-upload').click()">
+                        <input type="file" id="file-upload" class="hidden" accept="application/pdf" onchange="handleFileSelect(event)">
+                        <i data-lucide="file-spreadsheet" class="w-8 h-8 text-slate-400 mx-auto mb-2"></i>
+                        <p class="text-xs text-slate-500 font-medium">Glisser un PDF ici</p>
+                    </div>
+
+                    <div id="file-info" class="hidden mt-4 bg-slate-50 p-3 rounded border border-slate-100 flex items-center justify-between">
+                        <div class="truncate text-xs font-medium text-slate-700 w-2/3" id="filename-display">file.pdf</div>
+                        <div class="text-[10px] text-slate-400" id="filesize-display">0KB</div>
+                    </div>
+
+                    <button onclick="startDeepAnalysis()" id="process-btn" class="hidden w-full mt-4 bg-orange-600 hover:bg-orange-700 text-white text-sm py-2 rounded font-medium shadow-md transition flex justify-center items-center gap-2">
+                        <i data-lucide="play" class="w-4 h-4"></i> Lancer l'analyse
+                    </button>
+                </div>
+
+                <!-- Console Logs (Live) -->
+                <div class="bg-slate-900 rounded-xl p-4 text-slate-300 font-mono text-[10px] h-48 overflow-y-auto shadow-inner" id="console-logs">
+                    <div class="text-slate-500 border-b border-slate-700 pb-2 mb-2">Journal d'opérations IA...</div>
+                </div>
+
+            </div>
+
+            <!-- Right Column: Visualization -->
+            <div class="lg:col-span-2">
+                <div id="preview-card" class="bg-white rounded-xl shadow-sm border border-slate-200 h-full min-h-[500px] flex flex-col relative">
+                    
+                    <!-- Empty State -->
+                    <div id="empty-state" class="absolute inset-0 flex flex-col items-center justify-center text-slate-400 p-10 text-center">
+                        <i data-lucide="monitor-stop" class="w-16 h-16 mb-4 opacity-20"></i>
+                        <p>En attente de données...</p>
+                        <p class="text-xs mt-2 opacity-60">Les tableaux extraits apparaîtront ici.</p>
+                    </div>
+
+                    <!-- Loading Overlay -->
+                    <div id="loading-overlay" class="hidden absolute inset-0 bg-white/90 z-10 flex flex-col items-center justify-center">
+                        <div class="loader mb-6 w-12 h-12 border-4 border-orange-500 border-t-transparent"></div>
+                        <h3 class="text-lg font-bold text-slate-800 mb-2" id="loading-title">Analyse en cours</h3>
+                        <p class="text-sm text-slate-500" id="loading-desc">L'IA déchiffre les abaques...</p>
+                        <!-- Progress Steps -->
+                        <div class="mt-8 space-y-3 w-64">
+                            <div class="flex items-center gap-3 text-xs text-slate-400" id="step-1-indicator">
+                                <div class="w-2 h-2 rounded-full bg-slate-300"></div> 1. Extraction Multi-Feuilles
+                            </div>
+                            <div class="flex items-center gap-3 text-xs text-slate-400" id="step-2-indicator">
+                                <div class="w-2 h-2 rounded-full bg-slate-300"></div> 2. Audit & Auto-Correction
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Content (Hidden initially) -->
+                    <div id="results-content" class="hidden flex flex-col h-full">
+                        <!-- Tabs Header -->
+                        <div class="flex items-center justify-between bg-slate-50 border-b border-slate-200 px-4 pt-4">
+                            <div class="flex gap-4 overflow-x-auto" id="tabs-container">
+                                <!-- Tabs injected via JS -->
+                            </div>
+                            <div class="pb-2 pl-4">
+                                <button onclick="downloadExcel()" class="bg-green-600 hover:bg-green-700 text-white text-xs px-3 py-1.5 rounded flex items-center gap-2 shadow-sm transition">
+                                    <i data-lucide="download" class="w-3 h-3"></i> Export Excel
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Table Area -->
+                        <div class="flex-1 overflow-auto p-0 relative">
+                            <table class="w-full text-left border-collapse" id="result-table">
+                                <!-- Data injected via JS -->
+                            </table>
+                        </div>
+                        
+                        <!-- Footer Info -->
+                        <div class="bg-slate-50 border-t border-slate-200 p-2 text-[10px] text-slate-400 text-right flex justify-between px-4">
+                            <span id="validation-badge" class="flex items-center gap-1 text-green-600 font-medium">
+                                <i data-lucide="check-check" class="w-3 h-3"></i> Données validées par Gemini
+                            </span>
+                            <span>Aperçu limité aux 100 premières lignes</span>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        lucide.createIcons();
+
+        // --- Configuration & State ---
+        let state = {
+            apiKey: '',
+            models: [], // Sorted list of usable models
+            fileBase64: null,
+            fileName: '',
+            workbookData: null // Structure: { sheets: [ { sheetName: "CP 10t", data: [...] } ] }
+        };
+
+        // --- 1. Authentication & Model Discovery ---
+
+        async function verifyAndCatalogModels() {
+            const input = document.getElementById('api-key-input');
+            const btn = document.getElementById('verify-btn');
+            const statusDiv = document.getElementById('api-status');
+            const key = input.value.trim();
+
+            if (!key) return;
+
+            btn.disabled = true;
+            btn.innerHTML = '<div class="loader w-4 h-4 border-white border-t-transparent"></div>';
+
+            try {
+                // Fetch models
+                const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${key}`);
+                const data = await response.json();
+
+                if (!response.ok) throw new Error(data.error?.message || 'Clé invalide');
+
+                // Filter & Sort Models (Flash > Pro 1.5 > Others)
+                const usable = (data.models || [])
+                    .filter(m => m.supportedGenerationMethods && m.supportedGenerationMethods.includes('generateContent'))
+                    .sort((a, b) => {
+                        const score = n => n.includes('flash') ? 10 : (n.includes('1.5-pro') ? 8 : 1);
+                        return score(b.name) - score(a.name);
+                    })
+                    .map(m => ({ id: m.name.replace(/^models\//, ''), name: m.displayName }));
+
+                if (usable.length === 0) throw new Error("Aucun modèle 'generateContent' trouvé.");
+
+                state.apiKey = key;
+                state.models = usable;
+
+                // UI Success
+                statusDiv.classList.remove('hidden');
+                statusDiv.innerHTML = `✅ Connecté. ${usable.length} modèles disponibles (Principal: ${usable[0].name})`;
+                
+                // Activate Step 2
+                document.getElementById('card-config').classList.remove('step-active');
+                document.getElementById('card-upload').classList.remove('opacity-50', 'pointer-events-none');
+                document.getElementById('card-upload').classList.add('step-active');
+
+                addLog(`Système prêt. Modèle prioritaire: ${usable[0].id}`, 'success');
+
+            } catch (err) {
+                statusDiv.classList.remove('hidden');
+                statusDiv.className = 'mt-3 text-xs p-2 rounded bg-red-50 text-red-700 border border-red-100';
+                statusDiv.innerText = "Erreur: " + err.message;
+                addLog("Erreur connexion: " + err.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Connecter & Scanner';
+            }
+        }
+
+        // --- 2. File Handling ---
+
+        function handleFileSelect(e) {
+            const file = e.target.files[0];
+            if (!file || file.type !== 'application/pdf') return alert("PDF Requis");
+
+            state.fileName = file.name;
+            document.getElementById('filename-display').innerText = file.name;
+            document.getElementById('filesize-display').innerText = (file.size / 1024).toFixed(0) + ' KB';
+            document.getElementById('file-info').classList.remove('hidden');
+            document.getElementById('process-btn').classList.remove('hidden');
+
+            const reader = new FileReader();
+            reader.onload = (evt) => state.fileBase64 = evt.target.result.split(',')[1];
+            reader.readAsDataURL(file);
+        }
+
+        // --- 3. CORE: Deep Analysis Logic ---
+
+        async function startDeepAnalysis() {
+            if (!state.apiKey || !state.fileBase64) return;
+
+            // UI Setup
+            document.getElementById('loading-overlay').classList.remove('hidden');
+            document.getElementById('empty-state').classList.add('hidden');
+            document.getElementById('process-btn').classList.add('hidden');
+            document.getElementById('results-content').classList.add('hidden'); // Hide previous results
+
+            try {
+                // --- PHASE 1: EXTRACTION ---
+                updateLoadingStep(1, true);
+                const rawJson = await runGeminiTaskWithRetry(
+                    "EXTRACTION",
+                    `Analyse ce PDF d'abaques techniques.
+                    Structure ta réponse pour gérer PLUSIEURS tableaux potentiels (ex: par contre-poids, par longueur de flèche).
+                    
+                    Format JSON STRICT attendu :
+                    {
+                        "sheets": [
+                            {
+                                "sheetName": "Nom descriptif (ex: CP 10t)",
+                                "data": [
+                                    {"ColA": "Val1", "ColB": "Val2"...}
+                                ]
+                            }
+                        ]
+                    }
+                    Règle 1: Ne fusionne PAS les tableaux différents. Crée une 'sheet' par tableau.
+                    Règle 2: Utilise null pour les cases vides.`
+                );
+
+                addLog(`Extraction terminée. ${rawJson.sheets?.length || 0} tableaux détectés.`, 'info');
+
+                // --- PHASE 2: AUDIT & CORRECTION ---
+                updateLoadingStep(2, true);
+                
+                // We send the extracted JSON back to Gemini asking for validation
+                // Note: We resend the PDF so it can compare.
+                const verificationPrompt = `
+                    Voici des données JSON extraites du PDF ci-joint.
+                    Ta mission est d'agir comme un AUDITEUR TECHNIQUE (Double Check).
+                    
+                    1. Compare le JSON avec le PDF.
+                    2. Vérifie spécifiquement :
+                       - Les masses correspondent-elles aux portées ?
+                       - Y a-t-il des colonnes ou lignes oubliées ?
+                       - Les noms des feuilles ("sheetName") sont-ils corrects ?
+                    3. CORRIGE les erreurs directement dans le JSON.
+                    
+                    Renvoie le JSON final (même structure "sheets").
+                    
+                    Données à vérifier :
+                    ${JSON.stringify(rawJson).substring(0, 25000)} 
+                    (Note: JSON tronqué si trop long, concentre-toi sur la structure et les valeurs visibles ou utilise ta mémoire du PDF)
+                `;
+                
+                // Note: If JSON is massive, this might hit token limits. 
+                // In a real prod app, we might check length or do sheet-by-sheet validation.
+                // Here we try full validation.
+                
+                const verifiedJson = await runGeminiTaskWithRetry("VERIFICATION", verificationPrompt);
+                
+                state.workbookData = verifiedJson;
+                addLog("Vérification terminée. Données validées.", 'success');
+
+                // Render Results
+                renderWorkbook(state.workbookData);
+
+            } catch (error) {
+                addLog("Echec critique: " + error.message, 'error');
+                alert("Erreur lors de l'analyse : " + error.message);
+                document.getElementById('process-btn').classList.remove('hidden');
+            } finally {
+                document.getElementById('loading-overlay').classList.add('hidden');
+            }
+        }
+
+        // --- Helper: Robust Gemini Caller with Failover ---
+        
+        async function runGeminiTaskWithRetry(taskName, promptText) {
+            let lastError = null;
+
+            for (const model of state.models) {
+                addLog(`[${taskName}] Tentative avec ${model.name}...`);
+                
+                try {
+                    const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model.id}:generateContent?key=${state.apiKey}`, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                            contents: [{
+                                parts: [
+                                    { text: promptText },
+                                    { inline_data: { mime_type: "application/pdf", data: state.fileBase64 } }
+                                ]
+                            }],
+                            generationConfig: {
+                                temperature: 0.1, // Precision mode
+                                response_mime_type: "application/json"
+                            }
+                        })
+                    });
+
+                    if (response.status === 429 || response.status === 503) {
+                        addLog(`⚠️ Quota/Surcharge sur ${model.name}. Bascule...`, 'warning');
+                        continue; // Try next model
+                    }
+
+                    if (!response.ok) {
+                        const err = await response.json();
+                        throw new Error(err.error?.message || response.statusText);
+                    }
+
+                    const data = await response.json();
+                    const text = data.candidates[0].content.parts[0].text;
+                    const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+                    
+                    const parsed = JSON.parse(cleanJson);
+                    
+                    // Basic structural check
+                    if (!parsed.sheets || !Array.isArray(parsed.sheets)) {
+                         // Attempt to fix if AI returned flat array
+                         if (Array.isArray(parsed)) return { sheets: [{ sheetName: "Données", data: parsed }] };
+                         throw new Error("Structure JSON invalide (manque 'sheets')");
+                    }
+
+                    return parsed; // Success!
+
+                } catch (e) {
+                    lastError = e;
+                    addLog(`❌ Échec ${model.name}: ${e.message}`, 'error');
+                }
+            }
+            throw lastError || new Error("Tous les modèles ont échoué.");
+        }
+
+        // --- 4. UI Rendering ---
+
+        function renderWorkbook(workbook) {
+            const tabsContainer = document.getElementById('tabs-container');
+            const resultTable = document.getElementById('result-table');
+            
+            tabsContainer.innerHTML = '';
+            resultTable.innerHTML = '';
+            
+            if (!workbook.sheets.length) return;
+
+            // Create Tabs
+            workbook.sheets.forEach((sheet, index) => {
+                const btn = document.createElement('button');
+                btn.className = `whitespace-nowrap px-4 py-2 text-sm border-b-2 transition ${index === 0 ? 'border-orange-500 text-orange-700 font-bold' : 'border-transparent text-slate-500 hover:text-slate-700'}`;
+                btn.innerText = sheet.sheetName || `Feuille ${index + 1}`;
+                btn.onclick = () => switchTab(index);
+                tabsContainer.appendChild(btn);
+            });
+
+            // Render first sheet by default
+            renderSheet(workbook.sheets[0].data);
+            
+            document.getElementById('results-content').classList.remove('hidden');
+        }
+
+        function switchTab(index) {
+            // Update Tab UI
+            const tabs = document.getElementById('tabs-container').children;
+            Array.from(tabs).forEach((t, i) => {
+                t.className = `whitespace-nowrap px-4 py-2 text-sm border-b-2 transition ${i === index ? 'border-orange-500 text-orange-700 font-bold' : 'border-transparent text-slate-500 hover:text-slate-700'}`;
+            });
+
+            // Render Data
+            renderSheet(state.workbookData.sheets[index].data);
+        }
+
+        function renderSheet(data) {
+            const table = document.getElementById('result-table');
+            table.innerHTML = '';
+
+            if (!data || data.length === 0) {
+                table.innerHTML = '<tr><td class="p-4 text-slate-400">Aucune donnée sur cette feuille.</td></tr>';
+                return;
+            }
+
+            // Headers
+            const headers = Object.keys(data[0]);
+            const thead = document.createElement('thead');
+            thead.className = 'bg-slate-50 text-xs uppercase text-slate-500 font-medium';
+            let headRow = '<tr>';
+            headers.forEach(h => headRow += `<th class="px-4 py-3 border-b border-slate-200">${h}</th>`);
+            headRow += '</tr>';
+            thead.innerHTML = headRow;
+            table.appendChild(thead);
+
+            // Body
+            const tbody = document.createElement('tbody');
+            tbody.className = 'text-sm text-slate-700 divide-y divide-slate-100';
+            
+            data.slice(0, 100).forEach(row => {
+                const tr = document.createElement('tr');
+                headers.forEach(h => {
+                    const val = row[h];
+                    // Highlight potentially empty critical values
+                    const cellClass = (val === null || val === '') ? 'bg-red-50 text-red-400 italic' : '';
+                    tr.innerHTML += `<td class="px-4 py-2 ${cellClass}">${val !== null ? val : 'N/A'}</td>`;
+                });
+                tbody.appendChild(tr);
+            });
+            table.appendChild(tbody);
+        }
+
+        // --- 5. Export ---
+
+        function downloadExcel() {
+            if (!state.workbookData) return;
+
+            const wb = XLSX.utils.book_new();
+
+            state.workbookData.sheets.forEach(sheet => {
+                const ws = XLSX.utils.json_to_sheet(sheet.data);
+                // Sanitize sheet name (Excel limit 31 chars, no special chars)
+                let safeName = (sheet.sheetName || "Sheet").replace(/[\\/?*\[\]]/g, "").substring(0, 31);
+                
+                // Handle duplicate names if auto-generated names are identical
+                if (wb.SheetNames.includes(safeName)) {
+                    safeName = safeName.substring(0, 28) + Math.floor(Math.random() * 99);
+                }
+
+                XLSX.utils.book_append_sheet(wb, ws, safeName);
+            });
+
+            XLSX.writeFile(wb, `${state.fileName.replace('.pdf', '')}_expert_analyze.xlsx`);
+        }
+
+        // --- Utils ---
+
+        function addLog(msg, type = 'info') {
+            const div = document.getElementById('console-logs');
+            const row = document.createElement('div');
+            row.className = 'log-entry';
+            const color = type === 'error' ? 'text-red-400' : (type === 'success' ? 'text-green-400' : (type === 'warning' ? 'text-yellow-400' : 'text-slate-300'));
+            const icon = type === 'error' ? '❌' : (type === 'success' ? '✅' : '>');
+            
+            row.innerHTML = `<span class="text-slate-600 mr-2">${new Date().toLocaleTimeString('fr-FR', {hour12:false})}</span> ${icon} <span class="${color}">${msg}</span>`;
+            div.appendChild(row);
+            div.scrollTop = div.scrollHeight;
+        }
+
+        function updateLoadingStep(step, active) {
+            const el = document.getElementById(`step-${step}-indicator`);
+            if (active) {
+                el.classList.remove('text-slate-400');
+                el.classList.add('text-slate-800', 'font-bold');
+                el.querySelector('div').classList.remove('bg-slate-300');
+                el.querySelector('div').classList.add('bg-orange-500', 'animate-pulse');
+            } else {
+                // reset if needed
+            }
+        }
+
+    </script>
+</body>
+</html>
